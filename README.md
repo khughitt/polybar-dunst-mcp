@@ -1,15 +1,8 @@
 # Polybar Notification MCP
 
-An MCP (Model Context Protocol) server for displaying messages in polybar and showing popup notifications on Linux systems.
+An MCP (Model Context Protocol) server for displaying messages via [polybar](https://github.com/polybar/polybar) and [notify-send](https://man.archlinux.org/man/notify-send.1.en) / [dunst](https://github.com/dunst-project/dunst).
 
 Based on [neotanx/neomcps - sound notification mcp](https://github.com/neotanx/neo-mcps/tree/main/servers/sound-notification).
-
-## Features
-
-- **Polybar Integration**: Display messages in polybar status bar with customizable colors and duration
-- **Popup Notifications**: Show desktop notifications using notify-send/dunst
-- **Flexible Configuration**: Customize colors, duration, urgency, and icons
-- **Multiple Fallbacks**: Graceful fallbacks for different notification systems
 
 ## Installation
 
@@ -23,9 +16,11 @@ npm run build
 ### Available Tools
 
 #### `display_polybar_message`
+
 Display a message in polybar status bar.
 
 Parameters:
+
 - `message` (string): The message to display
 - `duration` (number, optional): Duration in seconds (default: 5)
 - `color` (string, optional): Text color (default: #ffffff)
@@ -80,6 +75,12 @@ Next, in `Cursor Settings` -> `Rules`, add a User rule to tell cursor when to us
 
 ```
 Always, after completing any user request (success or failure), call the "display_polybar_message" tool with a summary of the last action or result, before waiting for further user input.
+```
+
+Or:
+
+```
+Always, when you reach a point where you need user input, use the `show_popup_notification` to send a concise notification to let them know.
 ```
 
 #### Troubleshooting Cursor Integration:
