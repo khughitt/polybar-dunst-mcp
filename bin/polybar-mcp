@@ -1,0 +1,52 @@
+#!/usr/bin/env node
+
+import { resolve } from 'path';
+import { homedir } from 'os';
+import { spawn } from 'child_process';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+
+function expandPath(inputPath) {
+  if (inputPath.startsWith('~/')) {
+    return resolve(homedir(), inputPath.slice(2));
+  }
+  if (inputPath.includes('$HOME/')) {
+    return inputPath.replace('$HOME', homedir());
+  }
+  return inputPath;
+}
+
+// Get the actual script path
+const scriptPath = join(__dirname, '..', 'dist', 'index.js');
+
+// Expand any paths in arguments
+const expandedArgs = process.argv.slice(2).map(arg => {
+  if (arg.includes('/') && (arg.startsWith('~/') || arg.includes('$HOME/'))) {
+    return expandPath(arg);
+  }
+  return arg;
+});
+
+// Spawn the actual MCP server
+const child = spawn('node', [scriptPath, ...expandedArgs], {
+  stdio: 'inherit',
+  env: {
+    ...process.env,
+    // Expand any environment variables that might contain paths
+    ...Object.fromEntries(
+      Object.entries(process.env).map(([key, value]) => [
+        key,
+        value && (value.startsWith('~/') || value.includes('$HOME/')) 
+          ? expandPath(value) 
+          : value
+      ])
+    )
+  }
+});
+
+child.on('exit', (code) => {
+  process.exit(code || 0);
+});
