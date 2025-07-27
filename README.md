@@ -4,6 +4,10 @@ An MCP (Model Context Protocol) server for displaying messages via [polybar](htt
 
 Based on [neotanx/neomcps - sound notification mcp](https://github.com/neotanx/neo-mcps/tree/main/servers/sound-notification).
 
+<a href="https://glama.ai/mcp/servers/@khughitt/polybar-dunst-mcp">
+  <img width="380" height="200" src="https://glama.ai/mcp/servers/@khughitt/polybar-dunst-mcp/badge" alt="Polybar Notification MCP server" />
+</a>
+
 ## Installation
 
 ```bash
