@@ -1,7 +1,7 @@
 {
-  "name": "polybar-notification-mcp",
+  "name": "waybar-notify-mcp",
   "version": "1.0.0",
-  "description": "MCP server for displaying messages in polybar and popup notifications on Linux",
+  "description": "MCP server for displaying messages in waybar and popup notifications on Linux",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -9,11 +9,12 @@
     "dev": "tsc --watch",
     "start": "node dist/index.js",
     "lint": "eslint src/**/*.ts",
+    "lint:fix": "eslint . --concurrency=auto --fix",
     "format": "prettier --write src/**/*.ts"
   },
   "keywords": [
     "mcp",
-    "polybar",
+    "waybar",
     "notification",
     "linux",
     "cursor"
@@ -22,6 +23,7 @@
   "license": "MIT",
   "dependencies": {
     "@modelcontextprotocol/sdk": "^1.20.1",
+    "eslint-config-prettier": "^10.1.8",
     "zod": "3.25.76",
     "zod-to-json-schema": "^3.24.6"
   },
@@ -34,6 +36,6 @@
     "typescript": "^5.9.3"
   },
   "bin": {
-    "polybar-notification-mcp": "bin/polybar-mcp"
+    "waybar-notify-mcp": "bin/waybar-notify-mcp"
   }
 }

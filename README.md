@@ -1,6 +1,6 @@
-# Polybar Notification MCP
+# Waybar / notify-send MCP
 
-An MCP (Model Context Protocol) server for displaying messages via [polybar](https://github.com/polybar/polybar) and [notify-send](https://man.archlinux.org/man/notify-send.1.en) / [dunst](https://github.com/dunst-project/dunst).
+An MCP (Model Context Protocol) server that can notify via Waybar and/or desktop popups (`notify-send` / dunst).
 
 Based on [neotanx/neomcps - sound notification mcp](https://github.com/neotanx/neo-mcps/tree/main/servers/sound-notification).
 
@@ -15,41 +15,39 @@ npm run build
 
 ### Available Tools
 
-#### `display_polybar_message`
-
-Display a message in polybar status bar.
-
-Parameters:
-
-- `message` (string): The message to display
-- `duration` (number, optional): Duration in seconds (default: 5)
-- `color` (string, optional): Text color (default: #ffffff)
-- `background` (string, optional): Background color (default: #333333)
-
-#### `show_popup_notification`
-Show a desktop popup notification.
+#### `notify_user`
+Notify the user via Waybar and/or popup.
 
 Parameters:
-- `title` (string): Notification title
-- `message` (string): Notification message
-- `urgency` (string, optional): "low", "normal", or "critical" (default: normal)
-- `timeout` (number, optional): Timeout in milliseconds (default: 5000)
-- `icon` (string, optional): Icon name or path
+- `message` (string, required): Message body.
+- `title` (string, optional): Popup title (defaults to `message`).
+- `channels` (array, optional): Any of `["waybar", "popup"]`. Defaults to `["waybar","popup"]` (configurable via `MCP_NOTIFY_DEFAULT_CHANNELS`, comma-separated).
+- `urgency` (string, optional): Popup urgency (`low|normal|critical`, default `normal`).
+- `timeoutMs` (number, optional): Popup timeout in ms (default `5000`).
+- `icon` (string, optional): Popup icon name/path.
+- `waybar` (object, optional):
+  - `severity` (`info|warn|crit`): Accent/severity class (default `info`).
+  - `pulse` (bool): Enable slow pulse animation on the module.
+  - `durationSeconds` (number): Seconds before auto-clear and mode reset (default `8`).
+  - `text` (string): Override bar text (defaults to ` {message}`).
+  - `tooltip` (string): Override tooltip (defaults to `message`).
 
-### Polybar Setup
+Defaults can be overridden globally by setting `MCP_NOTIFY_DEFAULT_CHANNELS` (e.g., `MCP_NOTIFY_DEFAULT_CHANNELS=waybar` to disable popups).
 
-To integrate with polybar, add this module to your polybar config, e.g.:
+### Waybar Setup (Recommended)
 
-```ini
-[module/mcp-notification]
-type = custom/script
-exec = cat /tmp/polybar-mcp-message 2>/dev/null | jq -r '.message // ""' 2>/dev/null || echo ""
-interval = 1
-format = <label>
-format-prefix = "🤖 "
-format-underline = ${xrdb:color7}
-label = %output%
-```
+1. Copy or symlink `waybar/` to `~/.config/waybar/` (or merge into your existing config).
+2. Ensure `waybar/scripts/waybar-mcp.sh` is executable and available at `~/.config/waybar/scripts/waybar-mcp.sh`.
+3. The provided `config.desktop`/`config.laptop` already:
+   - Include `custom/mcp` in `modules-right`
+   - Define a `mcp` bar mode and include `~/.config/waybar/mcp-mode.json`
+4. Keep `~/.config/waybar/mcp-mode.json` present (default content provided in this repo) so reloads succeed.
+5. Reload Waybar to pick up changes: `pkill -SIGUSR2 waybar`. The module updates on `pkill -RTMIN+8 waybar`.
+
+Waybar module behavior:
+- Inactive: shows `󰂚 ready` in muted color.
+- Active: bell + message, underline + tint based on severity, optional pulse animation.
+- Click (or right-click) clears the message and resets mode to default.
 
 ### Cursor Integration
 
@@ -62,34 +60,28 @@ To configure Cursor to use this MCP server:
 ```json
 {
   "mcpServers": {
-    "polybar-notification": {
+    "waybar-notify-mcp": {
       "command": "node",
-      "args": ["~/cursor-polybar-mcp/bin/polybar-mcp"],
+      "args": ["~/waybar-notify-mcp/bin/waybar-notify-mcp"],
       "env": {}
     }
   }
 }
 ```
 
-Next, in `Cursor Settings` -> `Rules`, add a User rule to tell cursor when to use the MCP, e.g.:
+Next, in `Cursor Settings` -> `Rules`, add a User rule to tell Cursor when to use the MCP, e.g.:
 
 ```
-Always, after completing any user request (success or failure), call the "display_polybar_message" tool with a summary of the last action or result, before waiting for further user input.
-```
-
-Or:
-
-```
-Always, when you reach a point where you need user input, use the `show_popup_notification` to send a concise notification to let them know.
+When you need user attention, call notify_user with channels ["waybar","popup"] and a concise summary.
 ```
 
 #### Troubleshooting Cursor Integration:
 
 - **Restart Cursor** after adding the MCP configuration
 - **Check the Developer Console** (`Help` → `Toggle Developer Tools`) for any MCP connection errors
-- **Verify the path** to the `bin/polybar-mcp` file is correct
+- **Verify the path** to the `bin/waybar-notify-mcp` file is correct
 - **Ensure the project is built** by running `npm run build` before configuring Cursor
-- **Test the MCP server manually** by running: `node bin/polybar-mcp` to ensure it starts without errors
+- **Test the MCP server manually** by running: `node bin/waybar-notify-mcp` to ensure it starts without errors
 
 The server supports path expansion for `~/` and `$HOME/` paths, making configuration more flexible across different environments.
 
@@ -105,6 +97,5 @@ npm run format   # Format code
 ## Requirements
 
 - Linux system
-- polybar (optional, for status bar integration)
-- notify-send or dunstify (for popup notifications)
+- Waybar (recommended) and/or notify-send/dunstify
 - Node.js 18+

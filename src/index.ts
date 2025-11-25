@@ -7,27 +7,15 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import { homedir } from 'os';
-import { resolve } from 'path';
 import {
-  displayPolybarMessage,
+  displayWaybarMessage,
   showPopupNotification,
 } from './notification-utils.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
 
-function expandPath(inputPath: string): string {
-  if (inputPath.startsWith('~/')) {
-    return resolve(homedir(), inputPath.slice(2));
-  }
-  if (inputPath.includes('$HOME/')) {
-    return inputPath.replace('$HOME', homedir());
-  }
-  return inputPath;
-}
-
 const server = new Server(
   {
-    name: 'polybar-notification-mcp',
+    name: 'waybar-notify-mcp',
     version: '1.0.0',
   },
   {
@@ -37,51 +25,76 @@ const server = new Server(
   }
 );
 
-const DisplayPolybarMessageSchema = z.object({
-  message: z.string().describe('The message to display in polybar'),
-  duration: z
-    .number()
-    .optional()
-    .describe('Duration in seconds to display the message (default: 5)'),
-  color: z
+const NotifyUserSchema = z.object({
+  message: z.string().describe('Message body to display'),
+  title: z
     .string()
     .optional()
-    .describe('Text color for the message (default: #ffffff)'),
-  background: z
-    .string()
+    .describe('Popup notification title (defaults to message)'),
+  channels: z
+    .array(z.enum(['waybar', 'popup']))
     .optional()
-    .describe('Background color for the message (default: #333333)'),
-});
-
-const ShowPopupNotificationSchema = z.object({
-  title: z.string().describe('The notification title'),
-  message: z.string().describe('The notification message'),
+    .describe('Destinations to notify; defaults to ["waybar","popup"]'),
   urgency: z
     .enum(['low', 'normal', 'critical'])
     .optional()
-    .describe('Notification urgency level (default: normal)'),
-  timeout: z
+    .describe('Popup urgency (default: normal)'),
+  timeoutMs: z
     .number()
     .optional()
-    .describe('Notification timeout in milliseconds (default: 5000)'),
-  icon: z
-    .string()
+    .describe('Popup timeout in milliseconds (default: 5000)'),
+  icon: z.string().optional().describe('Popup icon name or path'),
+  waybar: z
+    .object({
+      severity: z
+        .enum(['info', 'warn', 'crit'])
+        .optional()
+        .describe('Waybar accent/severity'),
+      pulse: z.boolean().optional().describe('Enable pulse animation'),
+      durationSeconds: z
+        .number()
+        .optional()
+        .describe('Seconds before auto-clear (default: 8)'),
+      text: z
+        .string()
+        .optional()
+        .describe('Waybar text override (default: bell + message)'),
+      tooltip: z
+        .string()
+        .optional()
+        .describe('Waybar tooltip override (default: message)'),
+    })
     .optional()
-    .describe('Icon name or path for the notification'),
+    .describe('Waybar-specific options'),
 });
+
+function parseDefaultChannels(): Array<'waybar' | 'popup'> {
+  const raw = process.env.MCP_NOTIFY_DEFAULT_CHANNELS;
+  if (!raw) {
+    return ['waybar', 'popup'];
+  }
+  const parsed = raw
+    .split(',')
+    .map((item) => item.trim())
+    .filter(
+      (item): item is 'waybar' | 'popup' =>
+        item === 'waybar' || item === 'popup'
+    );
+  return parsed.length > 0 ? parsed : ['waybar', 'popup'];
+}
+
+const notifyUserJsonSchema = (zodToJsonSchema as (schema: unknown) => unknown)(
+  NotifyUserSchema
+);
 
 server.setRequestHandler(ListToolsRequestSchema, async () => {
   return {
     tools: [
       {
-        name: 'display_polybar_message',
-        description: 'Display a message in polybar status bar. Useful for notifying the user when an operation is complete or when waiting for user input.',
-        inputSchema: zodToJsonSchema(DisplayPolybarMessageSchema),
-      },
-      {
-        name: 'show_popup_notification',
-        description: 'Show a popup notification using notify-send/dunst. Useful for notifying the user when an operation is complete or when waiting for user input.',
-        inputSchema: zodToJsonSchema(ShowPopupNotificationSchema),
+        name: 'notify_user',
+        description:
+          'Notify the user via Waybar and/or popup (notify-send/dunst) with a single call.',
+        inputSchema: notifyUserJsonSchema,
       },
     ],
   };
@@ -92,37 +105,44 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 
   try {
     switch (name) {
-      case 'display_polybar_message': {
-        const { message, duration, color, background } =
-          DisplayPolybarMessageSchema.parse(args);
-        const result = await displayPolybarMessage(message, {
-          duration: duration || 5,
-          color: color || '#ffffff',
-          background: background || '#333333',
-        });
-        return {
-          content: [
-            {
-              type: 'text',
-              text: `Polybar message displayed: "${message}"${result ? ` - ${result}` : ''}`,
-            },
-          ],
-        };
-      }
+      case 'notify_user': {
+        const { message, title, channels, urgency, timeoutMs, icon, waybar } =
+          NotifyUserSchema.parse(args);
 
-      case 'show_popup_notification': {
-        const { title, message, urgency, timeout, icon } =
-          ShowPopupNotificationSchema.parse(args);
-        const result = await showPopupNotification(title, message, {
-          urgency: urgency || 'normal',
-          timeout: timeout || 5000,
-          icon,
-        });
+        const targets =
+          channels && channels.length > 0 ? channels : parseDefaultChannels();
+        const uniqueTargets = Array.from(new Set(targets));
+        const results: string[] = [];
+
+        if (uniqueTargets.includes('waybar')) {
+          const waybarResult = await displayWaybarMessage(message, {
+            severity: waybar?.severity,
+            pulse: waybar?.pulse ?? false,
+            durationSeconds: waybar?.durationSeconds,
+            text: waybar?.text,
+            tooltip: waybar?.tooltip,
+          });
+          results.push(`Waybar: ${waybarResult}`);
+        }
+
+        if (uniqueTargets.includes('popup')) {
+          const popupResult = await showPopupNotification(
+            title ?? message,
+            message,
+            {
+              urgency: urgency ?? 'normal',
+              timeout: timeoutMs ?? 5000,
+              icon,
+            }
+          );
+          results.push(`Popup: ${popupResult}`);
+        }
+
         return {
           content: [
             {
               type: 'text',
-              text: `Notification sent: "${title}" - "${message}"${result ? ` - ${result}` : ''}`,
+              text: results.join(' | '),
             },
           ],
         };
@@ -147,7 +167,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Polybar Notification MCP Server running on stdio');
+  console.error('Waybar Notification MCP Server running on stdio');
 }
 
 main().catch((error) => {
