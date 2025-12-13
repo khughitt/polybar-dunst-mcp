@@ -1,0 +1,16 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 120" fill="currentColor">
+  <!-- Ghost body -->
+  <path d="M50 5 C25 5, 10 25, 10 50 L10 95 Q10 105, 20 100 Q30 95, 35 100 Q40 105, 50 100 Q60 105, 65 100 Q70 95, 80 100 Q90 105, 90 95 L90 50 C90 25, 75 5, 50 5 Z" fill="currentColor" opacity="0.9"/>
+
+  <!-- Left eye -->
+  <ellipse cx="35" cy="45" rx="8" ry="10" fill="#1a1a2e"/>
+  <ellipse cx="37" cy="43" rx="3" ry="4" fill="#ffffff" opacity="0.8"/>
+
+  <!-- Right eye -->
+  <ellipse cx="65" cy="45" rx="8" ry="10" fill="#1a1a2e"/>
+  <ellipse cx="67" cy="43" rx="3" ry="4" fill="#ffffff" opacity="0.8"/>
+
+  <!-- Subtle blush -->
+  <ellipse cx="28" cy="55" rx="6" ry="3" fill="#ff9999" opacity="0.3"/>
+  <ellipse cx="72" cy="55" rx="6" ry="3" fill="#ff9999" opacity="0.3"/>
+</svg>

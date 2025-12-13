@@ -7,144 +7,161 @@ import {
   ListToolsRequestSchema,
 } from '@modelcontextprotocol/sdk/types.js';
 import { z } from 'zod';
-import {
-  displayWaybarMessage,
-  showPopupNotification,
-} from './notification-utils.js';
 import { zodToJsonSchema } from 'zod-to-json-schema';
+import { execFile } from 'child_process';
+import { promisify } from 'util';
+import { fileURLToPath } from 'url';
+import { dirname, join } from 'path';
+
+const execFileAsync = promisify(execFile);
+
+// Auto-discover shell.qml path relative to this module
+const __filename = fileURLToPath(import.meta.url);
+const __dirname = dirname(__filename);
+const SHELL_QML_PATH = join(__dirname, '..', 'ohai', 'shell.qml');
 
 const server = new Server(
-  {
-    name: 'waybar-notify-mcp',
-    version: '1.0.0',
-  },
-  {
-    capabilities: {
-      tools: {},
-    },
-  }
+  { name: 'ohai-mcp', version: '2.0.0' },
+  { capabilities: { tools: {} } }
 );
 
-const NotifyUserSchema = z.object({
+// --- Schemas ---
+
+const OhaiSchema = z.object({
   message: z.string().describe('Message body to display'),
-  title: z
+  title: z.string().optional().describe('Popup title (defaults to message)'),
+  severity: z
+    .enum(['info', 'warn', 'crit'])
+    .optional()
+    .describe('Accent color severity (default: info)'),
+  color: z
     .string()
     .optional()
-    .describe('Popup notification title (defaults to message)'),
-  channels: z
-    .array(z.enum(['waybar', 'popup']))
-    .optional()
-    .describe('Destinations to notify; defaults to ["waybar","popup"]'),
-  urgency: z
-    .enum(['low', 'normal', 'critical'])
-    .optional()
-    .describe('Popup urgency (default: normal)'),
-  timeoutMs: z
+    .describe('Custom accent color (CSS/hex; overrides severity)'),
+  timeoutSeconds: z
     .number()
     .optional()
-    .describe('Popup timeout in milliseconds (default: 5000)'),
-  icon: z.string().optional().describe('Popup icon name or path'),
-  waybar: z
-    .object({
-      severity: z
-        .enum(['info', 'warn', 'crit'])
-        .optional()
-        .describe('Waybar accent/severity'),
-      pulse: z.boolean().optional().describe('Enable pulse animation'),
-      durationSeconds: z
-        .number()
-        .optional()
-        .describe('Seconds before auto-clear (default: 8)'),
-      text: z
-        .string()
-        .optional()
-        .describe('Waybar text override (default: bell + message)'),
-      tooltip: z
-        .string()
-        .optional()
-        .describe('Waybar tooltip override (default: message)'),
-    })
+    .describe('Seconds before auto-hide (default: 8; 0 = persistent)'),
+  pattern: z.string().optional().describe('Background pattern ID or path'),
+  image: z.string().optional().describe('Image ID or path (default: ghost)'),
+  workspace: z
+    .string()
     .optional()
-    .describe('Waybar-specific options'),
+    .describe('Workspace to switch to on backtick'),
+  app: z.string().optional().describe('App/window to focus on backtick'),
 });
 
-function parseDefaultChannels(): Array<'waybar' | 'popup'> {
-  const raw = process.env.MCP_NOTIFY_DEFAULT_CHANNELS;
-  if (!raw) {
-    return ['waybar', 'popup'];
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+const ohaiJsonSchema = (zodToJsonSchema as (schema: any) => any)(OhaiSchema);
+
+// --- Helpers ---
+
+async function qsIpcCall(
+  target: string,
+  fn: string,
+  args: string[]
+): Promise<{ success: boolean; output?: string; error?: string }> {
+  try {
+    const { stdout } = await execFileAsync('qs', [
+      '-p',
+      SHELL_QML_PATH,
+      'ipc',
+      'call',
+      target,
+      fn,
+      ...args,
+    ]);
+    return { success: true, output: stdout.trim() };
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    return { success: false, error: message };
   }
-  const parsed = raw
-    .split(',')
-    .map((item) => item.trim())
-    .filter(
-      (item): item is 'waybar' | 'popup' =>
-        item === 'waybar' || item === 'popup'
-    );
-  return parsed.length > 0 ? parsed : ['waybar', 'popup'];
 }
 
-const notifyUserJsonSchema = (zodToJsonSchema as (schema: unknown) => unknown)(
-  NotifyUserSchema
-);
+async function isQuickshellReady(): Promise<boolean> {
+  try {
+    const { stdout } = await execFileAsync('qs', ['-p', SHELL_QML_PATH, 'ipc', 'show']);
+    return stdout.includes('ohai');
+  } catch {
+    return false;
+  }
+}
 
-server.setRequestHandler(ListToolsRequestSchema, async () => {
-  return {
-    tools: [
-      {
-        name: 'notify_user',
-        description:
-          'Notify the user via Waybar and/or popup (notify-send/dunst) with a single call.',
-        inputSchema: notifyUserJsonSchema,
-      },
-    ],
-  };
-});
+// --- Tool Handlers ---
+
+server.setRequestHandler(ListToolsRequestSchema, async () => ({
+  tools: [
+    {
+      name: 'ohai',
+      description:
+        'Display a notification popup via Quickshell. Supports custom styling, severity colors, and Hyprland workspace/app focus on backtick.',
+      inputSchema: ohaiJsonSchema,
+    },
+    {
+      name: 'ohai_status',
+      description:
+        'Check if the Quickshell notification daemon is running and the ohai IPC target is registered.',
+      inputSchema: { type: 'object', properties: {} },
+    },
+  ],
+}));
 
 server.setRequestHandler(CallToolRequestSchema, async (request) => {
   const { name, arguments: args } = request.params;
 
   try {
     switch (name) {
-      case 'notify_user': {
-        const { message, title, channels, urgency, timeoutMs, icon, waybar } =
-          NotifyUserSchema.parse(args);
+      case 'ohai': {
+        const params = OhaiSchema.parse(args);
 
-        const targets =
-          channels && channels.length > 0 ? channels : parseDefaultChannels();
-        const uniqueTargets = Array.from(new Set(targets));
-        const results: string[] = [];
+        // Build IPC call arguments (all 9 params, empty string = use default)
+        const defaultImage = process.env.OHAI_DEFAULT_IMAGE ?? '';
+        const ipcArgs = [
+          params.title ?? params.message, // title
+          params.message, // body
+          params.severity ?? '', // severity
+          String(params.timeoutSeconds ?? 8), // timeoutSeconds
+          params.pattern ?? '', // pattern
+          params.image ?? defaultImage, // image
+          params.workspace ?? '', // workspace
+          params.app ?? '', // app
+          params.color ?? '', // color
+        ];
 
-        if (uniqueTargets.includes('waybar')) {
-          const waybarResult = await displayWaybarMessage(message, {
-            severity: waybar?.severity,
-            pulse: waybar?.pulse ?? false,
-            durationSeconds: waybar?.durationSeconds,
-            text: waybar?.text,
-            tooltip: waybar?.tooltip,
-          });
-          results.push(`Waybar: ${waybarResult}`);
+        const result = await qsIpcCall('ohai', 'notify', ipcArgs);
+
+        if (result.success) {
+          console.error('[ohai] notification sent via IPC');
+          return {
+            content: [{ type: 'text', text: 'Notification sent' }],
+          };
+        } else {
+          console.error(`[ohai] IPC failed: ${result.error}`);
+          return {
+            content: [
+              {
+                type: 'text',
+                text: `Failed to send notification: ${result.error}`,
+              },
+            ],
+            isError: true,
+          };
         }
+      }
 
-        if (uniqueTargets.includes('popup')) {
-          const popupResult = await showPopupNotification(
-            title ?? message,
-            message,
-            {
-              urgency: urgency ?? 'normal',
-              timeout: timeoutMs ?? 5000,
-              icon,
-            }
-          );
-          results.push(`Popup: ${popupResult}`);
-        }
+      case 'ohai_status': {
+        const ready = await isQuickshellReady();
 
         return {
           content: [
             {
               type: 'text',
-              text: results.join(' | '),
+              text: ready
+                ? 'Quickshell is running with ohai IPC target registered'
+                : 'Quickshell ohai target not found - ensure quickshell is running with the ohai popup',
             },
           ],
+          isError: !ready,
         };
       }
 
@@ -164,13 +181,15 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
   }
 });
 
+// --- Main ---
+
 async function main() {
   const transport = new StdioServerTransport();
   await server.connect(transport);
-  console.error('Waybar Notification MCP Server running on stdio');
+  console.error('ohai MCP server running on stdio');
 }
 
 main().catch((error) => {
-  console.error('Fatal error in main():', error);
+  console.error('Fatal error:', error);
   process.exit(1);
 });

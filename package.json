@@ -1,7 +1,7 @@
 {
-  "name": "waybar-notify-mcp",
-  "version": "1.0.0",
-  "description": "MCP server for displaying messages in waybar and popup notifications on Linux",
+  "name": "ohai-mcp",
+  "version": "2.0.0",
+  "description": "MCP server for Quickshell notification popups on Linux",
   "main": "dist/index.js",
   "type": "module",
   "scripts": {
@@ -14,10 +14,9 @@
   },
   "keywords": [
     "mcp",
-    "waybar",
+    "quickshell",
     "notification",
-    "linux",
-    "cursor"
+    "linux"
   ],
   "author": "",
   "license": "MIT",
@@ -36,6 +35,6 @@
     "typescript": "^5.9.3"
   },
   "bin": {
-    "waybar-notify-mcp": "bin/waybar-notify-mcp"
+    "ohai-mcp": "bin/ohai-mcp"
   }
 }

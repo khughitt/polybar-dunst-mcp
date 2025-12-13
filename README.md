@@ -1,8 +1,6 @@
-# Waybar / notify-send MCP
+# ohai-mcp
 
-An MCP (Model Context Protocol) server that can notify via Waybar and/or desktop popups (`notify-send` / dunst).
-
-Based on [neotanx/neomcps - sound notification mcp](https://github.com/neotanx/neo-mcps/tree/main/servers/sound-notification).
+An MCP server that displays notification popups via Quickshell on Linux.
 
 ## Installation
 
@@ -11,91 +9,151 @@ npm install
 npm run build
 ```
 
-## Usage
+## Tools
 
-### Available Tools
+### `ohai`
 
-#### `notify_user`
-Notify the user via Waybar and/or popup.
+Display a notification popup.
 
-Parameters:
-- `message` (string, required): Message body.
-- `title` (string, optional): Popup title (defaults to `message`).
-- `channels` (array, optional): Any of `["waybar", "popup"]`. Defaults to `["waybar","popup"]` (configurable via `MCP_NOTIFY_DEFAULT_CHANNELS`, comma-separated).
-- `urgency` (string, optional): Popup urgency (`low|normal|critical`, default `normal`).
-- `timeoutMs` (number, optional): Popup timeout in ms (default `5000`).
-- `icon` (string, optional): Popup icon name/path.
-- `waybar` (object, optional):
-  - `severity` (`info|warn|crit`): Accent/severity class (default `info`).
-  - `pulse` (bool): Enable slow pulse animation on the module.
-  - `durationSeconds` (number): Seconds before auto-clear and mode reset (default `8`).
-  - `text` (string): Override bar text (defaults to ` {message}`).
-  - `tooltip` (string): Override tooltip (defaults to `message`).
+| Parameter | Type | Required | Description |
+|-----------|------|----------|-------------|
+| `message` | string | yes | Message body |
+| `title` | string | no | Popup title (defaults to message) |
+| `severity` | `info` \| `warn` \| `crit` | no | Accent color (default: `info`) |
+| `color` | string | no | Custom accent color (CSS/hex; overrides severity) |
+| `timeoutSeconds` | number | no | Auto-hide delay (default: 8; 0 = persistent) |
+| `pattern` | string | no | Background pattern ID or path |
+| `image` | string | no | Image ID or path (default: `ghost`) |
+| `workspace` | string | no | Workspace to switch to on backtick |
+| `app` | string | no | App/window to focus on backtick |
 
-Defaults can be overridden globally by setting `MCP_NOTIFY_DEFAULT_CHANNELS` (e.g., `MCP_NOTIFY_DEFAULT_CHANNELS=waybar` to disable popups).
+### `ohai_status`
 
-### Waybar Setup (Recommended)
+Check if Quickshell is running with the ohai IPC target registered.
 
-1. Copy or symlink `waybar/` to `~/.config/waybar/` (or merge into your existing config).
-2. Ensure `waybar/scripts/waybar-mcp.sh` is executable and available at `~/.config/waybar/scripts/waybar-mcp.sh`.
-3. The provided `config.desktop`/`config.laptop` already:
-   - Include `custom/mcp` in `modules-right`
-   - Define a `mcp` bar mode and include `~/.config/waybar/mcp-mode.json`
-4. Keep `~/.config/waybar/mcp-mode.json` present (default content provided in this repo) so reloads succeed.
-5. Reload Waybar to pick up changes: `pkill -SIGUSR2 waybar`. The module updates on `pkill -RTMIN+8 waybar`.
+## Quickshell Setup
 
-Waybar module behavior:
-- Inactive: shows `󰂚 ready` in muted color.
-- Active: bell + message, underline + tint based on severity, optional pulse animation.
-- Click (or right-click) clears the message and resets mode to default.
+1. Start the popup daemon:
+   ```bash
+   qs -p /path/to/ohai-mcp/ohai/shell.qml
+   ```
 
-### Cursor Integration
+2. Verify the IPC target is registered:
+   ```bash
+   qs ipc show
+   # Should list: target ohai
+   ```
 
-To configure Cursor to use this MCP server:
+3. Test manually:
+   ```bash
+   qs ipc call ohai notify "Hello" "Test message" "info" 5 "" "" "" "" ""
+   ```
 
-1. **Open Cursor Settings**: Press `Ctrl+,` (or `Cmd+,` on Mac) to open settings
-2. **Navigate to MCP Settings**: Search for "MCP" in the settings or look for "Model Context Protocol" settings
-3. **Add the MCP Server Configuration**: Add the following to your MCP settings configuration:
+4. Controls while popup is visible:
+   - `Escape` - hide popup
+   - Backtick (`) - switch to workspace or focus app (if configured), then hide
 
+### Bundled Assets
+
+**Patterns** (background overlays):
+- `waves-01`, `grid-01`, `stripes-01`, `sunset-01`
+
+**Images** (left panel):
+- `ghost` (default), `claude`, `openai`
+
+Use an absolute path for custom assets.
+
+## Integration
+
+Use `OHAI_DEFAULT_IMAGE` to set the default image per client.
+
+### Claude Code
+
+`~/.claude.json`:
 ```json
 {
   "mcpServers": {
-    "waybar-notify-mcp": {
+    "ohai": {
+      "type": "stdio",
       "command": "node",
-      "args": ["~/waybar-notify-mcp/bin/waybar-notify-mcp"],
-      "env": {}
+      "args": ["/path/to/ohai-mcp/bin/ohai-mcp"],
+      "env": {
+        "OHAI_DEFAULT_IMAGE": "claude"
+      }
     }
   }
 }
 ```
 
-Next, in `Cursor Settings` -> `Rules`, add a User rule to tell Cursor when to use the MCP, e.g.:
+### Cursor
+
+Add to MCP settings:
+```json
+{
+  "mcpServers": {
+    "ohai": {
+      "command": "node",
+      "args": ["/path/to/ohai-mcp/bin/ohai-mcp"],
+      "env": {
+        "OHAI_DEFAULT_IMAGE": "claude"
+      }
+    }
+  }
+}
+```
+
+### codex-cli
+
+`~/.codex/config.toml`:
+```toml
+[mcp_servers.ohai]
+command = "node"
+args = ["/path/to/ohai-mcp/bin/ohai-mcp"]
+
+[mcp_servers.ohai.env]
+OHAI_DEFAULT_IMAGE = "openai"
+```
+
+### Auto-launch (Hyprland)
 
 ```
-When you need user attention, call notify_user with channels ["waybar","popup"] and a concise summary.
+exec-once = qs -p /path/to/ohai-mcp/ohai/shell.qml
 ```
 
-#### Troubleshooting Cursor Integration:
+## Environment Variables
 
-- **Restart Cursor** after adding the MCP configuration
-- **Check the Developer Console** (`Help` → `Toggle Developer Tools`) for any MCP connection errors
-- **Verify the path** to the `bin/waybar-notify-mcp` file is correct
-- **Ensure the project is built** by running `npm run build` before configuring Cursor
-- **Test the MCP server manually** by running: `node bin/waybar-notify-mcp` to ensure it starts without errors
+| Variable | Description |
+|----------|-------------|
+| `OHAI_DEFAULT_IMAGE` | Default image when `image` param is not specified (e.g., `claude`, `openai`, `ghost`) |
 
-The server supports path expansion for `~/` and `$HOME/` paths, making configuration more flexible across different environments.
+## Architecture
+
+```
+┌─────────────┐     qs ipc call      ┌─────────────────┐
+│  MCP Client │ ──────────────────▶  │   Quickshell    │
+│  (Claude)   │                      │   (shell.qml)   │
+└─────────────┘                      └─────────────────┘
+       │                                     │
+       │                                     │
+       ▼                                     ▼
+┌─────────────┐                      ┌─────────────────┐
+│  ohai-mcp   │                      │  IpcHandler     │
+│  (Node.js)  │                      │  target: "ohai" │
+└─────────────┘                      └─────────────────┘
+```
+
+The MCP server communicates with Quickshell via its built-in IPC mechanism (`qs ipc call`), which uses a Unix socket for instant, reliable delivery.
 
 ## Development
 
 ```bash
 npm run dev      # Watch mode
 npm run build    # Build
-npm run lint     # Lint code
-npm run format   # Format code
+npm run lint     # Lint
+npm run format   # Format
 ```
 
 ## Requirements
 
-- Linux system
-- Waybar (recommended) and/or notify-send/dunstify
+- Linux with Quickshell
 - Node.js 18+
