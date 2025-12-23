@@ -4,6 +4,7 @@ import Quickshell
 import Quickshell.Widgets
 import Quickshell.Io
 import QtQuick.Effects
+import "effects"
 
 Scope {
 	id: root
@@ -54,7 +55,18 @@ Scope {
 	property string imageVariant: "ghost"
 	property color accentColor: "#7ad7ff"
 	property int popupVersion: 0
-	property real glitchShift: 0
+
+	// Shader effect properties (animated)
+	property real chromaticAberration: 0.0
+	property real shaderDisplacement: 0.0
+	property real noiseAmount: 0.0
+	property real scanlineAlpha: 0.0
+
+	// Baseline noise level (persists throughout)
+	property real baselineNoise: 0.045
+
+	// Glitch noise burst (added on top of baseline during glitches)
+	property real glitchNoiseBurst: 0.0
 
 	// IPC handler for receiving notifications from external processes
 	IpcHandler {
@@ -92,15 +104,15 @@ Scope {
 		}
 
 		function hide(): void {
-			root.visiblePopup = false;
+			exitAnimation.start();
 		}
 	}
 
-	// Hide after timeout
+	// Hide after timeout - trigger exit animation instead of immediate hide
 	Timer {
 		id: hideTimer
 		interval: root.timeoutSeconds * 1000
-		onTriggered: root.visiblePopup = false
+		onTriggered: exitAnimation.start()
 	}
 
 	LazyLoader {
@@ -112,11 +124,19 @@ Scope {
 			anchors.bottom: true
 			margins.right: 24
 			margins.bottom: 24
-			implicitWidth: 480
-			implicitHeight: Math.min(contentColumn.implicitHeight + 48, 720)
+
+			// Padding around notification for ripple overflow
+			property int ripplePadding: 100
+
+			// Notification dimensions
+			property int notificationWidth: 560
+			property int notificationHeight: Math.min(contentColumn.implicitHeight + 48, 720)
+
+			// Window sized to fit notification + ripple overflow
+			implicitWidth: notificationWidth + 2 * ripplePadding
+			implicitHeight: notificationHeight + 2 * ripplePadding
 			exclusiveZone: 0
 			color: "transparent"
-			mask: Region {}
 
 			Item {
 				id: panelContent
@@ -124,7 +144,7 @@ Scope {
 				opacity: 0
 				scale: 0.95
 				focus: true
-				Keys.onEscapePressed: root.visiblePopup = false
+				Keys.onEscapePressed: exitAnimation.start()
 				Keys.onPressed: {
 					if (event.key === Qt.Key_QuoteLeft) {
 						if (root.workspace !== "") {
@@ -134,22 +154,58 @@ Scope {
 							const cmd = ["hyprctl", "dispatch", "focuswindow", "title:" + root.app];
 							Qt.createQmlObject('import Quickshell.Io; Process { command: ' + JSON.stringify(cmd) + '; running: true }', root);
 						}
-						root.visiblePopup = false;
+						exitAnimation.start();
 					}
 				}
 
+				// Ripple echo effect - sized to notification, centered on it
+				RippleEcho {
+					id: rippleEffect
+					anchors.centerIn: notificationContainer
+					width: window.notificationWidth
+					height: window.notificationHeight
+					color: root.accentColor
+					radius: 20
+					waveCount: 4
+					rippleDuration: 1400
+					maxScale: 1.35
+					staggerDelay: 140
+					borderWidth: 4.0
+				}
+
+				// Container for actual notification (positioned at bottom-right)
 				Item {
-					anchors.fill: parent
+					id: notificationContainer
+					anchors.right: parent.right
+					anchors.bottom: parent.bottom
+					anchors.rightMargin: window.ripplePadding
+					anchors.bottomMargin: window.ripplePadding
+					width: window.notificationWidth
+					height: window.notificationHeight
+
+					// Click anywhere on notification to close
+					MouseArea {
+						anchors.fill: parent
+						onClicked: exitAnimation.start()
+						cursorShape: Qt.PointingHandCursor
+					}
 
 					Rectangle {
 						id: backdrop
 						anchors.fill: parent
 						radius: 20
-						color: "#1a10182a"
+						color: "transparent"
 						border.color: Qt.tint("#40ffffff", Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.45))
 						border.width: 1.5
-						clip: true
-						visible: true
+
+						// Apply glitch shader effect to entire backdrop
+						layer.enabled: true
+						layer.effect: GlitchEffect {
+							chromatic: root.chromaticAberration
+							displacement: root.shaderDisplacement
+							noiseAmount: root.baselineNoise + root.glitchNoiseBurst + root.noiseAmount
+							scanlineAlpha: root.scanlineAlpha
+						}
 
 						Image {
 							anchors.fill: parent
@@ -177,33 +233,17 @@ Scope {
 							anchors.margins: 18
 							spacing: 14
 
-							Item {
-								id: imageFrame
-								Layout.preferredWidth: 150
-								Layout.preferredHeight: 150
+							// Free-floating image (no background container)
+							Image {
+								id: accentImage
+								Layout.preferredWidth: textColumn.height
+								Layout.preferredHeight: textColumn.height
 								Layout.alignment: Qt.AlignTop
-								implicitHeight: Layout.preferredHeight
-
-								Rectangle {
-									id: imageCanvas
-									anchors.fill: parent
-									anchors.margins: 0
-									radius: 16
-									color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.16)
-									border.width: 0
-									clip: true
-
-									Image {
-										id: accentImage
-										anchors.fill: parent
-										anchors.margins: 12
-										fillMode: Image.PreserveAspectFit
-										source: imageResolver.resolve(root.imageVariant)
-										opacity: 0.95
-										smooth: true
-										visible: source !== ""
-									}
-								}
+								fillMode: Image.PreserveAspectFit
+								source: imageResolver.resolve(root.imageVariant)
+								opacity: 0.95
+								smooth: true
+								visible: source !== ""
 							}
 
 							Item {
@@ -256,33 +296,163 @@ Scope {
 				}
 			}
 
-			ParallelAnimation {
+			// Entry animation with glitch effect and ripples
+			SequentialAnimation {
 				id: entryAnimation
 				running: false
-				NumberAnimation {
-					target: panelContent
-					property: "opacity"
-					from: 0
-					to: 1
-					duration: 260
-					easing.type: Easing.OutCubic
+
+				ScriptAction {
+					script: rippleEffect.start()
 				}
-				SequentialAnimation {
+
+				ParallelAnimation {
 					NumberAnimation {
 						target: panelContent
-						property: "scale"
-						from: 0.92
-						to: 1.02
-						duration: 180
+						property: "opacity"
+						from: 0; to: 1
+						duration: 320
 						easing.type: Easing.OutCubic
 					}
+
+					SequentialAnimation {
+						NumberAnimation {
+							target: panelContent
+							property: "scale"
+							from: 0.88; to: 1.03
+							duration: 200
+							easing.type: Easing.OutCubic
+						}
+						NumberAnimation {
+							target: panelContent
+							property: "scale"
+							from: 1.03; to: 1
+							duration: 140
+							easing.type: Easing.OutQuad
+						}
+					}
+
+					SequentialAnimation {
+						NumberAnimation {
+							target: root
+							property: "chromaticAberration"
+							from: 0.045; to: 0.025
+							duration: 120
+							easing.type: Easing.OutQuad
+						}
+						NumberAnimation {
+							target: root
+							property: "chromaticAberration"
+							from: 0.025; to: 0
+							duration: 250
+							easing.type: Easing.OutCubic
+						}
+					}
+
+					SequentialAnimation {
+						NumberAnimation {
+							target: root
+							property: "shaderDisplacement"
+							from: -0.012; to: 0.008
+							duration: 100
+							easing.type: Easing.OutQuad
+						}
+						NumberAnimation {
+							target: root
+							property: "shaderDisplacement"
+							from: 0.008; to: 0
+							duration: 180
+							easing.type: Easing.OutCubic
+						}
+					}
+
+					SequentialAnimation {
+						NumberAnimation {
+							target: root
+							property: "glitchNoiseBurst"
+							from: 0; to: 0.04
+							duration: 120
+							easing.type: Easing.OutQuad
+						}
+						NumberAnimation {
+							target: root
+							property: "glitchNoiseBurst"
+							from: 0.04; to: 0.10
+							duration: 80
+							easing.type: Easing.InOutQuad
+						}
+						NumberAnimation {
+							target: root
+							property: "glitchNoiseBurst"
+							from: 0.10; to: 0.06
+							duration: 100
+							easing.type: Easing.InOutQuad
+						}
+						NumberAnimation {
+							target: root
+							property: "glitchNoiseBurst"
+							from: 0.06; to: 0
+							duration: 220
+							easing.type: Easing.InQuad
+						}
+					}
+				}
+			}
+
+			// Exit animation with glitch dissolve
+			SequentialAnimation {
+				id: exitAnimation
+				running: false
+
+				ParallelAnimation {
+					NumberAnimation {
+						target: panelContent
+						property: "opacity"
+						to: 0
+						duration: 220
+						easing.type: Easing.InCubic
+					}
+
 					NumberAnimation {
 						target: panelContent
 						property: "scale"
-						from: 1.02
-						to: 1
-						duration: 120
-						easing.type: Easing.OutQuad
+						to: 0.96
+						duration: 220
+						easing.type: Easing.InCubic
+					}
+
+					NumberAnimation {
+						target: root
+						property: "chromaticAberration"
+						from: 0; to: 0.035
+						duration: 220
+						easing.type: Easing.InQuad
+					}
+
+					NumberAnimation {
+						target: root
+						property: "shaderDisplacement"
+						from: 0; to: 0.015
+						duration: 220
+						easing.type: Easing.InQuad
+					}
+
+					NumberAnimation {
+						target: root
+						property: "noiseAmount"
+						from: 0; to: 0.15
+						duration: 220
+						easing.type: Easing.InQuad
+					}
+				}
+
+				ScriptAction {
+					script: {
+						root.visiblePopup = false;
+						root.chromaticAberration = 0;
+						root.shaderDisplacement = 0;
+						root.noiseAmount = 0;
+						root.glitchNoiseBurst = 0;
+						rippleEffect.stop();
 					}
 				}
 			}
@@ -290,29 +460,37 @@ Scope {
 			Timer {
 				id: glitchTimer
 				interval: 4200
-				running: root.visiblePopup
+				running: root.visiblePopup && !exitAnimation.running
 				repeat: true
-				onTriggered: glitchAnimation.restart()
+				onTriggered: idleGlitchAnimation.restart()
 			}
 
 			SequentialAnimation {
-				id: glitchAnimation
+				id: idleGlitchAnimation
 				running: false
-				NumberAnimation {
-					target: root
-					property: "glitchShift"
-					from: -6
-					to: 6
-					duration: 120
-					easing.type: Easing.OutQuad
+
+				ParallelAnimation {
+					NumberAnimation { target: root; property: "chromaticAberration"; from: 0; to: 0.008; duration: 100; easing.type: Easing.OutQuad }
+					NumberAnimation { target: root; property: "shaderDisplacement"; from: 0; to: -0.003; duration: 100; easing.type: Easing.OutQuad }
+					NumberAnimation { target: root; property: "glitchNoiseBurst"; from: 0; to: 0.03; duration: 100; easing.type: Easing.OutQuad }
 				}
-				NumberAnimation {
-					target: root
-					property: "glitchShift"
-					from: 6
-					to: 0
-					duration: 140
-					easing.type: Easing.OutQuad
+
+				ParallelAnimation {
+					NumberAnimation { target: root; property: "chromaticAberration"; from: 0.008; to: 0.022; duration: 60; easing.type: Easing.InOutQuad }
+					NumberAnimation { target: root; property: "shaderDisplacement"; from: -0.003; to: -0.008; duration: 60; easing.type: Easing.InOutQuad }
+					NumberAnimation { target: root; property: "glitchNoiseBurst"; from: 0.03; to: 0.07; duration: 60; easing.type: Easing.InOutQuad }
+				}
+
+				ParallelAnimation {
+					NumberAnimation { target: root; property: "chromaticAberration"; from: 0.022; to: 0.015; duration: 70; easing.type: Easing.InOutQuad }
+					NumberAnimation { target: root; property: "shaderDisplacement"; from: -0.008; to: 0.005; duration: 70; easing.type: Easing.InOutQuad }
+					NumberAnimation { target: root; property: "glitchNoiseBurst"; from: 0.07; to: 0.05; duration: 70; easing.type: Easing.InOutQuad }
+				}
+
+				ParallelAnimation {
+					NumberAnimation { target: root; property: "chromaticAberration"; from: 0.015; to: 0; duration: 180; easing.type: Easing.InQuad }
+					NumberAnimation { target: root; property: "shaderDisplacement"; from: 0.005; to: 0; duration: 180; easing.type: Easing.InQuad }
+					NumberAnimation { target: root; property: "glitchNoiseBurst"; from: 0.05; to: 0; duration: 180; easing.type: Easing.InQuad }
 				}
 			}
 
@@ -320,7 +498,12 @@ Scope {
 				target: root
 				function onPopupVersionChanged() {
 					panelContent.opacity = 0;
-					panelContent.scale = 0.95;
+					panelContent.scale = 0.88;
+					root.chromaticAberration = 0;
+					root.shaderDisplacement = 0;
+					root.noiseAmount = 0;
+					root.glitchNoiseBurst = 0;
+					rippleEffect.stop();
 					entryAnimation.restart();
 				}
 			}

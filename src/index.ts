@@ -20,6 +20,29 @@ const __filename = fileURLToPath(import.meta.url);
 const __dirname = dirname(__filename);
 const SHELL_QML_PATH = join(__dirname, '..', 'ohai', 'shell.qml');
 
+// Allow overriding qs path via env, fallback to common locations
+const QS_PATH = process.env.QS_PATH ?? 'qs';
+const QS_FALLBACK_PATHS = ['/usr/bin/qs', '/usr/local/bin/qs'];
+
+async function findQsPath(): Promise<string> {
+  // Try configured/default path first
+  try {
+    await execFileAsync('which', [QS_PATH]);
+    return QS_PATH;
+  } catch {
+    // Try fallback paths
+    for (const path of QS_FALLBACK_PATHS) {
+      try {
+        await execFileAsync('test', ['-x', path]);
+        return path;
+      } catch {
+        continue;
+      }
+    }
+  }
+  return QS_PATH; // Return default, let it fail with helpful error
+}
+
 const server = new Server(
   { name: 'ohai-mcp', version: '2.0.0' },
   { capabilities: { tools: {} } }
@@ -56,31 +79,81 @@ const ohaiJsonSchema = (zodToJsonSchema as (schema: any) => any)(OhaiSchema);
 
 // --- Helpers ---
 
+// Environment variables needed for QuickShell/Wayland to work properly
+const QS_ENV_VARS = [
+  'XDG_RUNTIME_DIR',
+  'WAYLAND_DISPLAY',
+  'DISPLAY',
+  'HOME',
+  'USER',
+  'DBUS_SESSION_BUS_ADDRESS',
+  'XDG_SESSION_TYPE',
+  'XDG_CURRENT_DESKTOP',
+  'HYPRLAND_INSTANCE_SIGNATURE',
+];
+
+function getQsEnv(): NodeJS.ProcessEnv {
+  const env: NodeJS.ProcessEnv = {};
+  for (const key of QS_ENV_VARS) {
+    if (process.env[key]) {
+      env[key] = process.env[key];
+    }
+  }
+  // Ensure XDG_RUNTIME_DIR is set (fallback to /run/user/<uid>)
+  if (!env.XDG_RUNTIME_DIR) {
+    const uid = process.getuid?.() ?? 1000;
+    env.XDG_RUNTIME_DIR = `/run/user/${uid}`;
+  }
+  return env;
+}
+
 async function qsIpcCall(
   target: string,
   fn: string,
   args: string[]
 ): Promise<{ success: boolean; output?: string; error?: string }> {
+  const qsPath = await findQsPath();
+  const cmdArgs = ['-p', SHELL_QML_PATH, 'ipc', 'call', target, fn, ...args];
+  const env = getQsEnv();
+
   try {
-    const { stdout } = await execFileAsync('qs', [
-      '-p',
-      SHELL_QML_PATH,
-      'ipc',
-      'call',
-      target,
-      fn,
-      ...args,
-    ]);
+    const { stdout, stderr } = await execFileAsync(qsPath, cmdArgs, { env });
+    if (stderr) {
+      console.error('[ohai] qs stderr:', stderr);
+    }
     return { success: true, output: stdout.trim() };
-  } catch (error) {
-    const message = error instanceof Error ? error.message : String(error);
-    return { success: false, error: message };
+  } catch (error: unknown) {
+    // Extract detailed error info from execFile errors
+    const execError = error as {
+      code?: number;
+      stderr?: string;
+      stdout?: string;
+      message?: string;
+    };
+
+    const details = [
+      `exit code: ${execError.code ?? 'unknown'}`,
+      execError.stderr ? `stderr: ${execError.stderr}` : null,
+      execError.stdout ? `stdout: ${execError.stdout}` : null,
+    ]
+      .filter(Boolean)
+      .join(', ');
+
+    // Log full debug info
+    console.error('[ohai] qs command failed');
+    console.error('[ohai] args:', JSON.stringify(cmdArgs));
+    console.error('[ohai] details:', details);
+
+    const message = execError.message ?? String(error);
+    return { success: false, error: `${message} (${details})` };
   }
 }
 
 async function isQuickshellReady(): Promise<boolean> {
   try {
-    const { stdout } = await execFileAsync('qs', ['-p', SHELL_QML_PATH, 'ipc', 'show']);
+    const qsPath = await findQsPath();
+    const env = getQsEnv();
+    const { stdout } = await execFileAsync(qsPath, ['-p', SHELL_QML_PATH, 'ipc', 'show'], { env });
     return stdout.includes('ohai');
   } catch {
     return false;
@@ -94,7 +167,7 @@ server.setRequestHandler(ListToolsRequestSchema, async () => ({
     {
       name: 'ohai',
       description:
-        'Display a notification popup via Quickshell. Supports custom styling, severity colors, and Hyprland workspace/app focus on backtick.',
+        'Display a notification popup via Quickshell. Supports custom styling, severity colors, and Hyprland workspace/app focus on backtick. IMPORTANT: This tool uses MCP - call it with a JSON object containing the parameters (message, title, severity, etc.), NOT as a shell command. The MCP server handles IPC internally.',
       inputSchema: ohaiJsonSchema,
     },
     {
