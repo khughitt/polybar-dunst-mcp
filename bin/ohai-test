@@ -1,0 +1,217 @@
+#!/bin/bash
+# ohai-test - Test notification popup with various configurations
+#
+# Usage:
+#   ohai-test [preset]         Run a preset test
+#   ohai-test custom [opts]    Custom notification with options
+#
+# Presets:
+#   info      Basic info notification (default)
+#   warn      Warning notification
+#   crit      Critical notification
+#   long      Long text to test layout
+#   short     Short minimal notification
+#   claude    Claude-themed notification
+#   openai    OpenAI-themed notification
+#   grid      Grid pattern background
+#   stripes   Stripes pattern background
+#   waves     Waves pattern background
+#   glow      Test glow transition effect
+#   ghost     Test ghost echo transition effect
+#   ripple    Test ripple transition effect
+#   all       Cycle through all presets (2s each)
+#
+# Custom options:
+#   -t, --title TEXT       Title text
+#   -b, --body TEXT        Body text
+#   -s, --severity LEVEL   info|warn|crit
+#   -i, --image ID         ghost|claude|openai or path
+#   -p, --pattern ID       grid-01|stripes-01|waves-01|sunset-01 or path
+#   -d, --duration SECS    Timeout in seconds (0 = persistent)
+#   -c, --color HEX        Custom accent color (e.g., #ff00ff)
+#   -w, --workspace ID     Hyprland workspace to switch on backtick
+#   -a, --app TITLE        Window title to focus on backtick
+#   -x, --transition TYPE  glow|ghost|ripple|none
+
+set -e
+
+# Resolve the ohai shell.qml path relative to this script
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+OHAI_PATH="$(dirname "$SCRIPT_DIR")/ohai"
+
+send_notification() {
+    local title="${1:-Notification}"
+    local body="${2:-Hello from ohai-test}"
+    local severity="${3:-info}"
+    local image="${4:-ghost}"
+    local pattern="${5:-}"
+    local timeout="${6:-8}"
+    local color="${7:-}"
+    local workspace="${8:-}"
+    local app="${9:-}"
+    local transition="${10:-}"
+
+    # Use qs ipc call to invoke the notify function
+    # Arguments: title body severity timeoutSeconds pattern image workspace app color transition
+    qs ipc -p "$OHAI_PATH" call ohai notify \
+        "$title" \
+        "$body" \
+        "$severity" \
+        "$timeout" \
+        "$pattern" \
+        "$image" \
+        "$workspace" \
+        "$app" \
+        "$color" \
+        "$transition"
+}
+
+preset_info() {
+    send_notification "Info Notification" "This is a standard info notification with default styling." "info" "ghost"
+}
+
+preset_warn() {
+    send_notification "Warning" "Something requires your attention. Please review." "warn" "ghost"
+}
+
+preset_crit() {
+    send_notification "Critical Alert" "Immediate action required! This is a critical notification." "crit" "ghost"
+}
+
+preset_long() {
+    local long_body="This is a much longer notification body text designed to test how the layout handles multiple lines of content. It should wrap properly and the image should remain constrained to a reasonable size rather than growing to match the full text height. The text card should remain fully visible without being pushed out of view."
+    send_notification "Long Text Test" "$long_body" "info" "ghost"
+}
+
+preset_short() {
+    send_notification "Done" "Task complete." "info" "ghost" "" 5
+}
+
+preset_claude() {
+    send_notification "Claude" "Hello! I'm ready to help with your coding tasks." "info" "claude" "" 8 "#cc785c"
+}
+
+preset_openai() {
+    send_notification "OpenAI" "GPT response received successfully." "info" "openai" "" 8 "#10a37f"
+}
+
+preset_grid() {
+    send_notification "Grid Pattern" "Testing the grid background pattern overlay." "info" "ghost" "grid-01"
+}
+
+preset_stripes() {
+    send_notification "Stripes Pattern" "Testing the stripes background pattern overlay." "warn" "ghost" "stripes-01"
+}
+
+preset_waves() {
+    send_notification "Waves Pattern" "Testing the waves background pattern overlay." "crit" "ghost" "waves-01"
+}
+
+preset_glow() {
+    send_notification "Glow Transition" "Testing the soft glow pulse entry effect." "info" "ghost" "" 8 "" "" "" "glow"
+}
+
+preset_ghost() {
+    send_notification "Ghost Echo" "Testing ghost echo - expanding copies of content." "warn" "ghost" "" 8 "" "" "" "ghost"
+}
+
+preset_ripple() {
+    send_notification "Ripple Effect" "Testing ripple borders emanating outward." "crit" "ghost" "" 8 "" "" "" "ripple"
+}
+
+preset_all() {
+    echo "Running all presets (2s interval)..."
+    for preset in info warn crit short long claude openai grid stripes waves glow ghost ripple; do
+        echo "  -> $preset"
+        "preset_$preset"
+        sleep 2
+    done
+    echo "Done!"
+}
+
+run_custom() {
+    local title="Custom Notification"
+    local body="Custom notification body"
+    local severity="info"
+    local image="ghost"
+    local pattern=""
+    local timeout="8"
+    local color=""
+    local workspace=""
+    local app=""
+    local transition=""
+
+    while [[ $# -gt 0 ]]; do
+        case $1 in
+            -t|--title)
+                title="$2"
+                shift 2
+                ;;
+            -b|--body)
+                body="$2"
+                shift 2
+                ;;
+            -s|--severity)
+                severity="$2"
+                shift 2
+                ;;
+            -i|--image)
+                image="$2"
+                shift 2
+                ;;
+            -p|--pattern)
+                pattern="$2"
+                shift 2
+                ;;
+            -d|--duration)
+                timeout="$2"
+                shift 2
+                ;;
+            -c|--color)
+                color="$2"
+                shift 2
+                ;;
+            -w|--workspace)
+                workspace="$2"
+                shift 2
+                ;;
+            -a|--app)
+                app="$2"
+                shift 2
+                ;;
+            -x|--transition)
+                transition="$2"
+                shift 2
+                ;;
+            *)
+                echo "Unknown option: $1"
+                exit 1
+                ;;
+        esac
+    done
+
+    send_notification "$title" "$body" "$severity" "$image" "$pattern" "$timeout" "$color" "$workspace" "$app" "$transition"
+}
+
+show_help() {
+    head -35 "$0" | tail -33 | sed 's/^# \?//'
+}
+
+# Main
+case "${1:-info}" in
+    -h|--help|help)
+        show_help
+        ;;
+    custom)
+        shift
+        run_custom "$@"
+        ;;
+    info|warn|crit|long|short|claude|openai|grid|stripes|waves|glow|ghost|ripple|all)
+        "preset_$1"
+        ;;
+    *)
+        echo "Unknown preset: $1"
+        echo "Run 'ohai-test --help' for usage"
+        exit 1
+        ;;
+esac

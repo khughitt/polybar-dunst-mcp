@@ -9,6 +9,9 @@ import "effects"
 Scope {
 	id: root
 
+	// Terminal color palette for theming
+	TerminalColors { id: termColors }
+
 	QtObject {
 		id: patternResolver
 		function resolve(pattern) {
@@ -33,10 +36,13 @@ Scope {
 
 	QtObject {
 		id: accentPicker
+		// Returns bright terminal color for UI elements (borders, text highlights)
 		function forSeverity(severity) {
-			if (severity === "crit") return "#ff6b6b";
-			if (severity === "warn") return "#ffb86c";
-			return "#7ad7ff";
+			return termColors.accentFor(severity);
+		}
+		// Returns normal terminal color for image tinting
+		function tintForSeverity(severity) {
+			return termColors.tintFor(severity);
 		}
 		function resolved(accent, severity) {
 			if (accent && accent !== "") return accent;
@@ -53,7 +59,9 @@ Scope {
 	property string workspace: ""
 	property string app: ""
 	property string imageVariant: "ghost"
+	property string transitionType: Quickshell.env("OHAI_TRANSITION") || "glow"
 	property color accentColor: "#7ad7ff"
+	property color tintColor: "#7aa2f7"  // Normal variant for image tinting
 	property int popupVersion: 0
 
 	// Shader effect properties (animated)
@@ -68,6 +76,9 @@ Scope {
 	// Glitch noise burst (added on top of baseline during glitches)
 	property real glitchNoiseBurst: 0.0
 
+	// Signal to trigger exit animation (used by Timer and IPC from outside LazyLoader scope)
+	signal requestExit()
+
 	// IPC handler for receiving notifications from external processes
 	IpcHandler {
 		target: "ohai"
@@ -81,7 +92,8 @@ Scope {
 			image: string,
 			workspace: string,
 			app: string,
-			color: string
+			color: string,
+			transition: string
 		): void {
 			root.title = title || body;
 			root.body = body;
@@ -89,9 +101,11 @@ Scope {
 			root.pattern = pattern || "";
 			root.imageVariant = image || "ghost";
 			root.accentColor = accentPicker.resolved(color, root.severity);
+			root.tintColor = accentPicker.tintForSeverity(root.severity);
 			root.timeoutSeconds = timeoutSeconds > 0 ? timeoutSeconds : 8;
 			root.workspace = workspace || "";
 			root.app = app || "";
+			root.transitionType = transition || Quickshell.env("OHAI_TRANSITION") || "glow";
 			root.visiblePopup = true;
 
 			if (root.timeoutSeconds > 0) {
@@ -104,7 +118,7 @@ Scope {
 		}
 
 		function hide(): void {
-			exitAnimation.start();
+			root.requestExit();
 		}
 	}
 
@@ -112,7 +126,7 @@ Scope {
 	Timer {
 		id: hideTimer
 		interval: root.timeoutSeconds * 1000
-		onTriggered: exitAnimation.start()
+		onTriggered: root.requestExit()
 	}
 
 	LazyLoader {
@@ -125,16 +139,16 @@ Scope {
 			margins.right: 24
 			margins.bottom: 24
 
-			// Padding around notification for ripple overflow
-			property int ripplePadding: 100
+			// Padding around notification for glow effect overflow
+			property int glowPadding: 60
 
 			// Notification dimensions
 			property int notificationWidth: 560
 			property int notificationHeight: Math.min(contentColumn.implicitHeight + 48, 720)
 
 			// Window sized to fit notification + ripple overflow
-			implicitWidth: notificationWidth + 2 * ripplePadding
-			implicitHeight: notificationHeight + 2 * ripplePadding
+			implicitWidth: notificationWidth + 2 * glowPadding
+			implicitHeight: notificationHeight + 2 * glowPadding
 			exclusiveZone: 0
 			color: "transparent"
 
@@ -158,19 +172,16 @@ Scope {
 					}
 				}
 
-				// Ripple echo effect - sized to notification, centered on it
-				RippleEcho {
-					id: rippleEffect
+				// Transition effect - dynamic loader for glow/ghost/ripple effects
+				TransitionLoader {
+					id: transitionEffect
 					anchors.centerIn: notificationContainer
 					width: window.notificationWidth
 					height: window.notificationHeight
+					effectType: root.transitionType
 					color: root.accentColor
 					radius: 20
-					waveCount: 4
-					rippleDuration: 1400
-					maxScale: 1.35
-					staggerDelay: 140
-					borderWidth: 4.0
+					sourceItem: notificationContainer
 				}
 
 				// Container for actual notification (positioned at bottom-right)
@@ -178,8 +189,8 @@ Scope {
 					id: notificationContainer
 					anchors.right: parent.right
 					anchors.bottom: parent.bottom
-					anchors.rightMargin: window.ripplePadding
-					anchors.bottomMargin: window.ripplePadding
+					anchors.rightMargin: window.glowPadding
+					anchors.bottomMargin: window.glowPadding
 					width: window.notificationWidth
 					height: window.notificationHeight
 
@@ -195,8 +206,7 @@ Scope {
 						anchors.fill: parent
 						radius: 20
 						color: "transparent"
-						border.color: Qt.tint("#40ffffff", Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.45))
-						border.width: 1.5
+						// Border removed for free-floating look
 
 						// Apply glitch shader effect to entire backdrop
 						layer.enabled: true
@@ -233,22 +243,30 @@ Scope {
 							anchors.margins: 18
 							spacing: 14
 
-							// Free-floating image (no background container)
+							// Free-floating image with color tint - height matches text container
 							Image {
 								id: accentImage
-								Layout.preferredWidth: textColumn.height
+								Layout.preferredWidth: textColumn.height  // Square based on text height
 								Layout.preferredHeight: textColumn.height
-								Layout.alignment: Qt.AlignTop
+								Layout.alignment: Qt.AlignVCenter
 								fillMode: Image.PreserveAspectFit
 								source: imageResolver.resolve(root.imageVariant)
 								opacity: 0.95
 								smooth: true
 								visible: source !== ""
+
+								// Apply color tint based on severity
+								layer.enabled: true
+								layer.effect: ColorTintEffect {
+									tintColor: root.tintColor
+									intensity: 1.0
+								}
 							}
 
 							Item {
 								id: textColumn
 								Layout.fillWidth: true
+								Layout.minimumWidth: 280
 								Layout.preferredHeight: Math.max(textContent.implicitHeight + 40, 140)
 								implicitHeight: Layout.preferredHeight
 
@@ -256,9 +274,9 @@ Scope {
 									id: card
 									anchors.fill: parent
 									radius: 18
-									color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.08)
-									border.color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.5)
-									border.width: 1
+									color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.18)
+									border.color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.6)
+									border.width: 1.5
 									clip: true
 
 									ColumnLayout {
@@ -302,7 +320,7 @@ Scope {
 				running: false
 
 				ScriptAction {
-					script: rippleEffect.start()
+					script: transitionEffect.start()
 				}
 
 				ParallelAnimation {
@@ -452,7 +470,7 @@ Scope {
 						root.shaderDisplacement = 0;
 						root.noiseAmount = 0;
 						root.glitchNoiseBurst = 0;
-						rippleEffect.stop();
+						transitionEffect.stop();
 					}
 				}
 			}
@@ -503,8 +521,11 @@ Scope {
 					root.shaderDisplacement = 0;
 					root.noiseAmount = 0;
 					root.glitchNoiseBurst = 0;
-					rippleEffect.stop();
+					transitionEffect.stop();
 					entryAnimation.restart();
+				}
+				function onRequestExit() {
+					exitAnimation.start();
 				}
 			}
 		}

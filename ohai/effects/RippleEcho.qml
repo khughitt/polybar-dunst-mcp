@@ -12,6 +12,9 @@ Item {
     // Corner radius to match the notification
     property real radius: 20
 
+    // Source item (unused, for interface compatibility with TransitionLoader)
+    property Item sourceItem: null
+
     // Number of ripple waves
     property int waveCount: 3
 

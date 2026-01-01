@@ -72,6 +72,10 @@ const OhaiSchema = z.object({
     .optional()
     .describe('Workspace to switch to on backtick'),
   app: z.string().optional().describe('App/window to focus on backtick'),
+  transition: z
+    .enum(['glow', 'ghost', 'ripple', 'none'])
+    .optional()
+    .describe('Entry transition effect (default: glow, or OHAI_TRANSITION env var)'),
 });
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -187,7 +191,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
       case 'ohai': {
         const params = OhaiSchema.parse(args);
 
-        // Build IPC call arguments (all 9 params, empty string = use default)
+        // Build IPC call arguments (all 10 params, empty string = use default)
         const defaultImage = process.env.OHAI_DEFAULT_IMAGE ?? '';
         const ipcArgs = [
           params.title ?? params.message, // title
@@ -199,6 +203,7 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
           params.workspace ?? '', // workspace
           params.app ?? '', // app
           params.color ?? '', // color
+          params.transition ?? '', // transition (glow, ghost, ripple, none)
         ];
 
         const result = await qsIpcCall('ohai', 'notify', ipcArgs);
