@@ -142,8 +142,16 @@ Scope {
 			// Padding around notification for glow effect overflow
 			property int glowPadding: 60
 
-			// Notification dimensions
-			property int notificationWidth: 560
+			// Layout constraints
+			property int maxWidth: 1140
+			property int minTextWidth: 280
+			property int contentMargin: 18
+			property int contentSpacing: 14
+
+			// Responsive notification width - use 1/3 screen width (capped at maxWidth), fit within screen bounds
+			property int preferredWidth: screen ? Math.min(Math.round(screen.width / 3), maxWidth) : maxWidth
+			property int availableWidth: screen ? screen.width - margins.right * 2 - glowPadding * 2 : preferredWidth
+			property int notificationWidth: Math.min(preferredWidth, availableWidth)
 			property int notificationHeight: Math.min(contentColumn.implicitHeight + 48, 720)
 
 			// Window sized to fit notification + ripple overflow
@@ -274,7 +282,7 @@ Scope {
 									id: card
 									anchors.fill: parent
 									radius: 18
-									color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.18)
+									color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.38)
 									border.color: Qt.rgba(root.accentColor.r, root.accentColor.g, root.accentColor.b, 0.6)
 									border.width: 1.5
 									clip: true
